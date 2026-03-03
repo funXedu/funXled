@@ -18,20 +18,19 @@ using namespace fl;
 #define TOY_PWD "12345678"    // WiFi密碼（至少8位）
 
 // ========== LED配置 (ESP01S只有GPIO0和GPIO2可用) ==========
-#define LED_PIN 2           // GPIO2 - 內建LED, 和WS2812燈帶共用
+#define LED_PIN 0           // WS2812燈帶
 #define NUM_LEDS 8          // 8個LED
 #define COLOR_ORDER GRB     // WS2812色序
 #define CHIPSET WS2812B     // LED晶片類型
 CRGBArray<NUM_LEDS> leds;   // LED陣列
 
 // ========== 震動感應器配置 ==========
-#define VIBRATION_PIN 0     // GPIO0 - 震動感應器
+#define VIBRATION_PIN 2     // 震動感應器
 #define VIBRATION_THRESHOLD 600 // 震動觸發閾值 (根據實際情況調整)
 
 // ========== 變數 ==========
 unsigned long lastVibrationTime = 0;
 int animationMode = 0;
-unsigned long animationTimer = 0;
 bool autoMode = true;  // 自動模式（由震動觸發）
 CRGB monoColor = CRGB::Cyan;  // 單色模式顏色
 
@@ -80,8 +79,8 @@ unsigned long colorTransitionFrames = 0; // 色彩漸層進度（每個 50ms 呼
 const unsigned long colorTransitionDuration = 20; // 色彩過渡持續 20 個呼吸週期（~1秒）
 
 // ========== 閒置/睡眠管理 ==========
-unsigned long lastActivity = 0;       // 最後活動時間（ms）
-unsigned long idleTimeout = 300000;   // 閒置超時 ms (預設 300000ms = 5 分鐘)
+unsigned long lastActivity = 0;     // 最後活動時間（ms）
+#define IDLETIMEOUT 180000           // 閒置超時 ms (預設 180000ms = 3 分鐘)
 
 // ========== Web服務器 ==========
 ESP8266WebServer server(80);
@@ -669,7 +668,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   
-  Serial.println("\n\n========== 互動玩具初始化 ==========");
+  Serial.println("\n\n========== 互動LED初始化 ==========");
   
   // WiFi初始化
   initWiFi();
@@ -697,7 +696,7 @@ void setup() {
   FastLED.show();
   
   // 震動感應器初始化
-  pinMode(VIBRATION_PIN, INPUT);
+  pinMode(VIBRATION_PIN, INPUT_PULLUP);
   // 初始化閒置計時
   resetIdleTimer();
 }
@@ -707,7 +706,7 @@ void loop() {
   server.handleClient();
   
   // 檢測震動
-  if (autoMode && digitalRead(VIBRATION_PIN) == HIGH) {
+  if (autoMode && digitalRead(VIBRATION_PIN) == LOW) { // 震動感應器通常是常高，震動時拉低
     unsigned long currentTime = millis();
     if (currentTime - lastVibrationTime > VIBRATION_THRESHOLD) {
       handleVibration();
@@ -716,12 +715,12 @@ void loop() {
   }
   
   // 更新動畫
-  updateAnimation();
-  
+  updateAnimation();  
   FastLED.show();
+
   // 檢查是否閒置超時，進入深度睡眠
-  if (idleTimeout > 0 && (millis() - lastActivity) > idleTimeout) {
-    Serial.println("🔌 閒置超時，進入深度睡眠...");
+  if ((millis() - lastActivity) > IDLETIMEOUT) {
+    Serial.println("🔌 閒置超時，準備進入深度睡眠...");
     enterDeepSleep();
   }
   delay(30);
@@ -731,7 +730,6 @@ void initWiFi() {
   Serial.println();
   Serial.println(F("Setting WiFi AP..."));
   WiFi.mode(WIFI_AP);
-  //WiFi.setSleep(false);
   delay(100); // 等待模式切換
 
   uint8_t macAddr[6];
@@ -740,27 +738,11 @@ void initWiFi() {
   snprintf(ssidBuffer, sizeof(ssidBuffer), "%s_%02X%02X%02X", TOY_SSID, macAddr[3], macAddr[4], macAddr[5]);
   Serial.print(F("SSID=")); Serial.println(ssidBuffer);
 
-  // 檢查密碼長度（WPA2 要求至少 8 字元）
-  if (strlen(TOY_PWD) < 8) {
-    Serial.println(F("⚠️ 密碼長度小於8，將先嘗試使用開放 AP（無密碼）以便偵錯"));
-  }
-
   bool ok = WiFi.softAP(ssidBuffer, strlen(TOY_PWD) >= 8 ? TOY_PWD : nullptr);
-  Serial.print(F("softAP() returned: ")); Serial.println(ok ? "true" : "false");
-
   if (ok) {
-    Serial.print(F("AP IP: ")); Serial.println(WiFi.softAPIP());
-    Serial.println(F("successfully!"));
-    return;
-  }
-
-  // 若用密碼啟用失敗，嘗試不設密碼的開放 AP
-  Serial.println(F("嘗試不設密碼啟用 AP..."));
-  if (WiFi.softAP(ssidBuffer)) {
-    Serial.println(F("softAP (open) 成功"));
-    Serial.print(F("AP IP: ")); Serial.println(WiFi.softAPIP());
+    Serial.print(F("done! SSID=")); Serial.println(ssidBuffer);
   } else {
-    Serial.println(F("softAP (open) 也失敗，請檢查硬體連線與引腳狀態"));
+    Serial.println(F("softAP (open) 失敗，請檢查硬體連線與引腳狀態"));
     Serial.print(F("WiFi mode: ")); Serial.println(WiFi.getMode());
     Serial.print(F("WiFi status: ")); Serial.println(WiFi.status());
   }
@@ -832,7 +814,6 @@ void handleToggleAuto() {
 
 void setAnimationMode(int mode) {
   animationMode = mode;
-  animationTimer = millis();
   // 重設色彩相關變數
   currentColorIndex = 0;
   currentAnimColor = breathingColors[0];
@@ -869,7 +850,6 @@ void handleVibration() {
   resetIdleTimer();
   Serial.println("✨ 偵測到震動！");
   animationMode = (animationMode + 1) % MODE_COUNT;
-  animationTimer = millis();
 }
 
 void updateAnimation() {
@@ -1126,20 +1106,38 @@ void resetIdleTimer() {
 
 // 進入深度睡眠（等待外部 Reset / RST 喚醒）
 void enterDeepSleep() {
-  Serial.println("💤 準備進入深度睡眠...");
-  // 優雅關閉 LED
+  // 多重防抖檢測
+  for(int i=0; i<15; i++) {
+    if(digitalRead(VIBRATION_PIN) == LOW) {
+      Serial.println("❌ 取消睡眠：檢測到持續震動");
+      return;
+    }
+    delay(50);
+  }
+  Serial.println("✅ 震動檢測通過");
+
+  // 關閉 LED
   FastLED.clear();
   FastLED.show();
   delay(50);
+  Serial.println("✅ LED已關閉");
 
-  // 停止服務並關閉 WiFi
+  // 停止Web服務器
   server.stop();
-  WiFi.softAPdisconnect(true);
-  WiFi.disconnect(true);
-  delay(20);
+  delay(50);
+  Serial.println("✅ Web服務器已停止");
 
+  // 關閉 WiFi
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(50);
+  Serial.println("✅ WiFi已關閉");
+
+  Serial.println("💤 進入深度睡眠，需外部 Reset 喚醒");
+  Serial.flush();
   // 呼叫深度睡眠，參數為 microseconds，0 表示無限期睡眠，需外部 Reset 喚醒
   ESP.deepSleep(0);
+
   // 如果仍執行到這裡，稍作等待
   delay(1000);
 }
