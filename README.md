@@ -24,8 +24,7 @@
 - 自動睡眠搖晃喚醒
 
 ### demo影片
-[![](/docs/demo.png)](https://photos.app.goo.gl/DxF1x6WUieuEwjR69)
-
+[![Shorts 封面](docs/demo1.png)](https://www.youtube.com/shorts/kQEZia2FRsY)
 ---
 
 ## 🔧 硬體需求
